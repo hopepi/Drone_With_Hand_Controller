@@ -8,13 +8,13 @@ import atexit
 import control  # 🧠 Drone komutları buradan çağrılır
 
 # ---------- AYARLAR ----------
-SERVER_IP = '10.245.198.73'  # PC/server IP
-SERVER_PORT = 8000       # El komut server portu
+SERVER_IP = '10.245.198.73'  # 📡 PC'deki tahmin sunucusunun IP'si
+SERVER_PORT = 8000           # 📡 El komut sunucusu portu
 
-# ---------- GLOBAL DEĞİŞKENLER ----------
+# ---------- GLOBAL DURUMLAR ----------
 drone_state = "land"
 emergency_flag = False
-current_altitude = 1.0  # Varsayılan başlangıç yüksekliği
+current_altitude = 1.0
 
 # ---------- LOG FONKSİYONU ----------
 def log(msg, level="info"):
@@ -24,22 +24,40 @@ def log(msg, level="info"):
     }
     print(f"{renk.get(level, '')}{msg}{renk['end']}")
 
-# ---------- KALKIŞ & İNİŞ ----------
+# ---------- DRONE TEMEL FONKSİYONLARI ----------
 def takeoff_and_hover(target_altitude=1.0):
-    if target_altitude < 1.0: target_altitude = 1.0
-    if target_altitude > 3.0: target_altitude = 3.0
-    log(f"🚁 Kalkış! {target_altitude:.1f} metreye yükseliyor...", "success")
     global current_altitude
+    target_altitude = max(1.0, min(3.0, float(target_altitude)))
     current_altitude = target_altitude
+    log(f"🚁 Kalkış! {target_altitude:.1f} metreye yükseliyor...", "success")
     control.arm_and_takeoff(target_altitude)
 
 def land_drone():
-    log("🛬 Drone iniş yapıyor...", "danger")
     global current_altitude
+    log("🛬 Drone iniş yapıyor...", "danger")
     current_altitude = 0.0
     control.land()
 
 atexit.register(land_drone)
+
+# ---------- SETUP ----------
+def setup():
+    try:
+        control.connect_drone("/dev/serial0")
+        log("✅ Drone bağlantısı başarılı", "success")
+    except Exception as e:
+        log(f"🚫 Drone bağlantı hatası: {e}", "danger")
+        exit(1)
+
+    try:
+        control.configure_PID()
+        log("⚙️ PID konfigürasyonu tamamlandı", "success")
+    except Exception as e:
+        log(f"🚫 PID konfigürasyon hatası: {e}", "danger")
+        exit(1)
+
+    takeoff_and_hover(1.0)
+    log("🟢 Sistem hazır. El komutu bekleniyor...", "success")
 
 # ---------- FLASK APP ----------
 app = Flask(__name__)
@@ -54,6 +72,7 @@ def command():
     data = request.json
     mode = data.get("mode")
     altitude = data.get("altitude")
+
     log(f"📥 Komut alındı | Mod: {mode}, İrtifa: {altitude}", "info")
 
     try:
@@ -98,13 +117,13 @@ def hand_command():
             if not part:
                 break
             data += part
+
         command_json = data.decode('utf-8')
         log(f"📨 PC'den gelen komut tahmini: {command_json}", "info")
-
         result_data = json.loads(command_json)
         client_socket.close()
     except Exception as e:
-        log(f"EL KOMUTU gönderilemedi: {str(e)}", "danger")
+        log(f"❌ EL KOMUTU gönderilemedi: {str(e)}", "danger")
         return jsonify({"result": f"PC'ye iletilemedi: {str(e)}"}), 500
 
     return jsonify(result_data or {"result": "Bilinmeyen hata"})
@@ -124,8 +143,6 @@ def confirm_command():
         if command in valid_commands:
             drone_state = command
             log(f"✅ Komut ONAYLANDI → Drone hareket: {command}", "success")
-
-            # 🔥 El komutuna göre hareket başlat
             control.apply_hand_command(command)
         else:
             log(f"⚠️ Geçersiz komut onaylandı (yok sayıldı): {command}", "warning")
@@ -133,7 +150,7 @@ def confirm_command():
         drone_state = "hover"
         log("❌ Komut REDDEDİLDİ → Drone hover modda bekliyor", "warning")
 
-    return "", 204  # No Content
+    return "", 204
 
 @app.route("/emergency", methods=["POST"])
 def emergency():
@@ -152,9 +169,8 @@ def resume():
     log("✅ Emergency bitti, sistem tekrar aktif", "success")
     return jsonify({"status": "emergency sıfırlandı, devam edebilirsiniz"})
 
+# ---------- MAIN ----------
 if __name__ == "__main__":
-    control.configure_PID()
-    control.connect_drone("/dev/serial0")  # ← Bağlantı noktan buysa
-    takeoff_and_hover(1.0)
+    setup()
     log("🤖 El Komut Sunucusu başlatılıyor...", "info")
     app.run(host="0.0.0.0", port=5000)
