@@ -61,7 +61,7 @@ def command():
     except (ValueError, TypeError):
         alt = 1.0
 
-    alt = max(1.0, min(5.0, alt))
+    alt = max(1.0, min(3.0, alt))
     if current_altitude != alt:
         takeoff_and_hover(alt)
 
