@@ -6,7 +6,7 @@ import time
 
 # ---------- PID ve hız sabitleri ----------
 MAX_SPEED = 0.3        # m/s
-MAX_YAW = 15         # derece/saniye
+MAX_YAW = 15         # derece/saniyee
 
 # YAW PID parametreleri
 P_YAW, I_YAW, D_YAW = 0.18, 0.018, 0.0
