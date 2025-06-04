@@ -3,6 +3,7 @@ from simple_pid import PID
 import drone_control as drone
 import time
 
+
 MAX_SPEED = 0.6       # m/s
 MAX_YAW = 15          # derece/s
 P_YAW = 0.01
@@ -78,3 +79,25 @@ def send_position_control(dx, dy, area, area_ref=3000):
 
     print(f"PID Pozisyon: dx={dx} dy={dy} alan={area} | vx={vx:.2f} vy={vy:.2f} vz={vz:.2f}")
     drone.send_ned_velocity(vx, vy, vz, duration=1)
+
+
+def apply_hand_command(command: str):
+    """
+    Gelen komuta göre drone hareketi başlatır.
+    'ileri', 'geri', 'sag', 'sol', 'dur'
+    """
+    duration = 1  # hareket süresi (sn)
+    speed = 0.3   # sabit hız (m/s)
+
+    if command == "ileri":
+        drone.send_ned_velocity(speed, 0, 0, duration)
+    elif command == "geri":
+        drone.send_ned_velocity(-speed, 0, 0, duration)
+    elif command == "sag":
+        drone.send_ned_velocity(0, speed, 0, duration)
+    elif command == "sol":
+        drone.send_ned_velocity(0, -speed, 0, duration)
+    elif command == "dur":
+        stop_drone()
+    else:
+        print(f"⚠️ Bilinmeyen komut: {command}")
