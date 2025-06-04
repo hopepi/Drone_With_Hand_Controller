@@ -4,14 +4,15 @@ import drone_control as drone
 import time
 
 
-MAX_SPEED = 0.6       # m/s
-MAX_YAW = 15          # derece/s
-P_YAW = 0.01
-P_ROLL = 0.18
-I_YAW = 0
-D_YAW = 0
-I_ROLL = 0
-D_ROLL = 0
+# ---------- PID ve hız sabitleri ----------
+MAX_SPEED = 0.3        # m/s
+MAX_YAW = 15         # derece/saniye
+
+# YAW PID parametreleri
+P_YAW, I_YAW, D_YAW = 0.18, 0.018, 0.0
+
+# ROLL (pozisyon) PID parametreleri
+P_ROLL, I_ROLL, D_ROLL = 0.135, 0.182, 0.0036
 
 pidYaw = None
 pidRoll = None
