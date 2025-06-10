@@ -90,7 +90,7 @@ def run_hand_server():
 
             # ========== TAHMİN BAŞLA ==========
             image = Image.open(io.BytesIO(img_data)).convert("RGB")
-            image = image.rotate(-90, expand=True)  # 🔁 90° saat yönü
+            image = image.rotate(-90, expand=True)
 
             img_tensor = transform(image).unsqueeze(0)
 

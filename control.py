@@ -99,6 +99,6 @@ def apply_hand_command(command: str):
     elif command == "sol":
         drone.send_ned_velocity(0, -speed, 0, duration)
     elif command == "dur":
-        stop_drone()
+        drone.land()
     else:
         print(f"⚠️ Bilinmeyen komut: {command}")
