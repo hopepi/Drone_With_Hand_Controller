@@ -1,13 +1,12 @@
-import socket
-import struct
-import json
+from flask import Flask, request, jsonify
 import torch
 import torch.nn as nn
 from torchvision import transforms
 from PIL import Image
 import io
+import json
 
-# ========== MODEL TANIMI ==========
+# ========== MODEL VE TRANSFORM ==========
 class CNNModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -34,93 +33,81 @@ class CNNModel(nn.Module):
         x = self.fc(x)
         return x
 
-# ========== MODEL YÜKLE ==========
 model = CNNModel()
 model.load_state_dict(torch.load("model/hand_model_Son.pt", map_location=torch.device('cpu')))
 model.eval()
 
-# ========== DÖNÜŞÜM ==========
 transform = transforms.Compose([
     transforms.Resize((64, 64)),
     transforms.ToTensor(),
 ])
 
-# ========== SINIFLAR ==========
 label_map = ['DUR', 'ILERI', 'SAG', 'SOL', 'GERI']
 
-# ========== SOCKET SERVER ==========
-HOST = '0.0.0.0'
-PORT = 8000
+# ========== FLASK ==========
 
-def run_hand_server():
-    while True:
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_socket.bind((HOST, PORT))
-        server_socket.listen(1)
-        print(f"✋ EL KOMUTU SERVER başladı: {HOST}:{PORT}, bağlantı bekleniyor...")
+app = Flask(__name__)
 
-        conn, addr = server_socket.accept()
-        print(f"📡 Bağlantı geldi: {addr}")
-        buffer = b""
+PI_IP = "10.245.61.138"  # Bu IP'yi sabit tut, sen girersin zaten uygulamadan
 
-        try:
-            # MODE BYTE
-            while len(buffer) < 1:
-                buffer += conn.recv(4096)
-            mode = buffer[:1].decode()
-            buffer = buffer[1:]
-            if mode != "E":
-                print("⛔ Yanlış mod geldi:", mode)
-                conn.close()
-                server_socket.close()
-                continue
+@app.route("/confirm_command", methods=["POST"])
+def confirm_command():
+    try:
+        data = request.get_json()
+        command = data.get("command")
+        confirmation = data.get("confirmation")
 
-            # BOYUT
-            while len(buffer) < 4:
-                buffer += conn.recv(4096)
-            img_size = struct.unpack(">L", buffer[:4])[0]
-            buffer = buffer[4:]
+        if not command or confirmation not in ["okey", "no"]:
+            return jsonify({"error": "Eksik veri"}), 400
 
-            # GÖRÜNTÜ
-            while len(buffer) < img_size:
-                buffer += conn.recv(4096)
-            img_data = buffer[:img_size]
-            buffer = buffer[img_size:]
+        print(f"📥 Onay durumu: {confirmation}, Komut: {command}")
 
-            # ========== TAHMİN BAŞLA ==========
-            image = Image.open(io.BytesIO(img_data)).convert("RGB")
-            image = image.rotate(-90, expand=True)
+        if confirmation == "okey":
+            # 👇 PI’ye komutu gönderiyoruz
+            response = requests.post(
+                f"http://{PI_IP}:5000/execute_command",
+                json={"command": command},
+                timeout=3
+            )
 
-            img_tensor = transform(image).unsqueeze(0)
+            if response.status_code == 200:
+                print("📤 Komut Pi'ye gönderildi.")
+                return jsonify({"status": "command sent to pi"}), 200
+            else:
+                print("⚠️ Pi'den kötü yanıt geldi.")
+                return jsonify({"error": "Pi yanıt vermedi"}), 500
 
-            with torch.no_grad():
-                output = model(img_tensor)
-                prob = torch.softmax(output, dim=1)
-                confidence, pred_idx = torch.max(prob, 1)
+        else:
+            print("❌ Komut reddedildi, işlem yok.")
+            return jsonify({"status": "reddedildi"}), 200
 
-            predicted_label = label_map[pred_idx.item()]
-            conf_score = confidence.item()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-            print(f"✅ Tahmin: {predicted_label} | Güven: {conf_score:.2f}")
+@app.route("/tahmin", methods=["POST"])
+def tahmin():
+    file = request.files.get("photo")
+    if file is None:
+        return jsonify({"hata": "foto eksik"}), 400
 
-            result_json = json.dumps({
-                "status": "el_komutu",
-                "komut": predicted_label.lower(),
-                "confidence": round(conf_score, 2)
-            }).encode("utf-8")
+    try:
+        img = Image.open(file.stream).convert("RGB")
+        img = img.rotate(-90, expand=True)
+        tensor = transform(img).unsqueeze(0)
 
-            conn.sendall(struct.pack(">L", len(result_json)) + result_json)
+        with torch.no_grad():
+            output = model(tensor)
+            prob = torch.softmax(output, dim=1)
+            confidence, pred_idx = torch.max(prob, 1)
 
-        except Exception as e:
-            print("⛔ Hata:", e)
+        result = {
+            "komut": label_map[pred_idx.item()].lower(),
+            "confidence": round(confidence.item(), 2)
+        }
+        return jsonify(result)
 
-        finally:
-            try: conn.close()
-            except: pass
-            try: server_socket.close()
-            except: pass
-            print("🔁 Yeni bağlantı için hazır...\n")
+    except Exception as e:
+        return jsonify({"hata": str(e)}), 500
 
 if __name__ == "__main__":
-    run_hand_server()
+    app.run(host="0.0.0.0", port=5050)

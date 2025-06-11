@@ -1,16 +1,16 @@
-import socket
-import struct
+# ... diğer importlar ...
+# import socket, struct, json artık gereksiz olanları silebilirsin
 import json
-import threading
-import time
-from flask import Flask, request, jsonify
 import random
+import time
+import threading
 import atexit
+from flask import Flask, request, jsonify
 import control
 
 # ---------- AYARLAR ----------
-SERVER_IP = '10.245.198.73'  # 📡 PC'deki tahmin sunucusunun IP'si
-SERVER_PORT = 8000           # 📡 El komut sunucusu portu
+SERVER_IP = '10.245.127.131'
+SERVER_PORT = 8000
 
 # ---------- GLOBAL DURUMLAR ----------
 drone_state = "land"
@@ -28,8 +28,6 @@ def log(msg, level="info"):
 # ---------- DRONE TEMEL FONKSİYONLARI ----------
 def takeoff_and_hover(target_altitude=1.0):
     global current_altitude, drone_state
-
-    # Zaten havadaysa tekrar kalkmaya gerek yok
     if drone_state != "land":
         log("Drone zaten havada, kalkış iptal.", "warning")
         return
@@ -40,9 +38,8 @@ def takeoff_and_hover(target_altitude=1.0):
     control.arm_and_takeoff(target_altitude)
     drone_state = "guide"
 
-
 def land_drone():
-    global current_altitude,drone_state
+    global current_altitude, drone_state
     log("Drone iniş yapıyor...", "danger")
     current_altitude = 0.0
     drone_state = "land"
@@ -84,11 +81,9 @@ def ping():
 def command():
     global drone_state, current_altitude
     data = request.json
-
     mode = data.get("mode")
     altitude = data.get("altitude")
 
-    # Hatalı veya eksik parametre kontrolü
     if mode is None or altitude is None:
         log("Eksik parametre: mode veya altitude yok", "warning")
         return jsonify({"status": "eksik parametre"}), 400
@@ -102,7 +97,6 @@ def command():
 
     alt = max(1.0, min(3.0, alt))
 
-    # Sadece "land" durumundayken kalkış yapılabilir
     if current_altitude != alt and drone_state == "land":
         takeoff_and_hover(alt)
     elif current_altitude != alt:
@@ -118,41 +112,6 @@ def command():
         "id": random.randint(10000, 99999)
     })
 
-
-@app.route("/hand_command", methods=["POST"])
-def hand_command():
-    file = request.files.get("photo")
-    if file is None:
-        return jsonify({"result": "Fotoğraf yok"}), 400
-
-    img_bytes = file.read()
-
-    try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.connect((SERVER_IP, SERVER_PORT))
-        client_socket.sendall(b'E')
-        client_socket.sendall(struct.pack(">L", len(img_bytes)) + img_bytes)
-
-        # Tahmin sonucunu al
-        cmd_len_bytes = client_socket.recv(4)
-        cmd_len = struct.unpack(">L", cmd_len_bytes)[0]
-        data = b""
-        while len(data) < cmd_len:
-            part = client_socket.recv(cmd_len - len(data))
-            if not part:
-                break
-            data += part
-
-        command_json = data.decode('utf-8')
-        log(f"PC'den gelen komut tahmini: {command_json}", "info")
-        result_data = json.loads(command_json)
-        client_socket.close()
-    except Exception as e:
-        log(f"EL KOMUTU gönderilemedi: {str(e)}", "danger")
-        return jsonify({"result": f"PC'ye iletilemedi: {str(e)}"}), 500
-
-    return jsonify(result_data or {"result": "Bilinmeyen hata"})
-
 @app.route("/confirm_command", methods=["POST"])
 def confirm_command():
     global drone_state
@@ -161,7 +120,6 @@ def confirm_command():
     command = data.get("command")
     confirmation = data.get("confirmation")
 
-    # Eksik veri kontrolü
     if not command or not confirmation:
         log("Eksik onay parametreleri alındı", "warning")
         return jsonify({"status": "eksik veri"}), 400
@@ -182,6 +140,25 @@ def confirm_command():
         log("Komut REDDEDİLDİ → Drone hover modda bekliyor", "warning")
 
     return "", 204
+
+
+@app.route("/execute_command", methods=["POST"])
+def execute_command():
+    global drone_state
+
+    data = request.get_json()
+    command = data.get("command")
+
+    valid_commands = ["sag", "sol", "ileri", "geri", "dur"]
+
+    if command in valid_commands and not emergency_flag:
+        drone_state = command
+        log(f"[PI] Komut alındı → Drone hareket: {command}", "success")
+        control.apply_hand_command(command)
+        return jsonify({"status": "uygulandı"}), 200
+    else:
+        log(f"[PI] Geçersiz veya emergencyde komut geldi: {command}", "danger")
+        return jsonify({"status": "geçersiz veya emergency aktif"}), 400
 
 
 @app.route("/emergency", methods=["POST"])
